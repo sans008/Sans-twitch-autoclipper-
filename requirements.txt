@@ -1,0 +1,6 @@
+flask>=3.0
+yt-dlp>=2024.1
+librosa>=1.0
+opencv-python>=4.9
+scipy>=1.11
+numpy>=1.26
