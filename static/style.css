@@ -1,0 +1,229 @@
+:root {
+  --bg: #0c0d10;
+  --panel: #16171c;
+  --line: #26282f;
+  --text: #e9e9ec;
+  --dim: #8a8d98;
+  --hot: #ff4d3d;
+  --hot-dim: #ff4d3d33;
+  --ok: #3ddc97;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", sans-serif;
+}
+
+.wrap {
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 48px 20px 80px;
+}
+
+header {
+  text-align: center;
+  margin-bottom: 36px;
+}
+
+.mark { display: flex; justify-content: center; margin-bottom: 8px; }
+.mark-svg {
+  width: 64px; height: 38px;
+  stroke: var(--hot);
+  stroke-width: 2.5;
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+h1 {
+  font-size: 28px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  margin: 0 0 6px;
+}
+
+.sub {
+  color: var(--dim);
+  font-size: 14.5px;
+  margin: 0;
+}
+
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 22px;
+  margin-bottom: 18px;
+}
+
+.hidden { display: none !important; }
+
+.field-row {
+  display: flex;
+  gap: 10px;
+}
+
+#url {
+  flex: 1;
+  background: #0c0d10;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  padding: 12px 14px;
+  color: var(--text);
+  font-size: 14.5px;
+  outline: none;
+}
+#url:focus { border-color: var(--hot); }
+
+#start-btn {
+  background: var(--hot);
+  color: #14090a;
+  border: none;
+  border-radius: 9px;
+  padding: 0 20px;
+  font-weight: 700;
+  font-size: 14.5px;
+  cursor: pointer;
+  transition: filter 0.15s;
+}
+#start-btn:hover { filter: brightness(1.08); }
+#start-btn:disabled { opacity: 0.5; cursor: default; }
+
+.settings {
+  margin-top: 16px;
+  color: var(--dim);
+  font-size: 13.5px;
+}
+.settings summary {
+  cursor: pointer;
+  user-select: none;
+  padding: 4px 0;
+}
+
+.settings-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px 20px;
+  margin-top: 14px;
+}
+
+.settings-grid label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12.5px;
+  color: var(--dim);
+}
+
+.settings-grid input, .settings-grid select {
+  background: #0c0d10;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  padding: 7px 9px;
+  color: var(--text);
+  font-size: 13.5px;
+}
+
+.hint { color: var(--dim); font-size: 11.5px; }
+
+.stage-line {
+  display: flex;
+  justify-content: space-between;
+  font-size: 13.5px;
+  margin-bottom: 12px;
+}
+#stage-label { color: var(--text); font-weight: 600; text-transform: capitalize; }
+#pct-label { color: var(--dim); font-variant-numeric: tabular-nums; }
+
+.pulse-track {
+  position: relative;
+  height: 40px;
+  border-radius: 8px;
+  overflow: hidden;
+  background: #0c0d10;
+  border: 1px solid var(--line);
+}
+.pulse-svg {
+  width: 100%; height: 100%;
+  stroke: var(--hot-dim);
+  stroke-width: 1.5;
+  fill: none;
+}
+.pulse-fill {
+  position: absolute;
+  top: 0; left: 0; bottom: 0;
+  width: 0%;
+  background: linear-gradient(90deg, transparent, var(--hot-dim));
+  border-right: 2px solid var(--hot);
+  transition: width 0.4s ease;
+}
+
+.error {
+  color: var(--hot);
+  font-size: 13.5px;
+  margin: 12px 0 0;
+}
+
+#results-panel h2 {
+  font-size: 15px;
+  color: var(--dim);
+  font-weight: 600;
+  margin: 0 0 16px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 14px;
+}
+
+.card {
+  background: #0c0d10;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.card img {
+  width: 100%;
+  aspect-ratio: 16/9;
+  object-fit: cover;
+  display: block;
+  background: #000;
+}
+
+.card-body {
+  padding: 10px 12px;
+}
+
+.card-meta {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11.5px;
+  color: var(--dim);
+  margin-bottom: 8px;
+}
+
+.score-tag {
+  color: var(--hot);
+  font-weight: 700;
+}
+
+.card a.dl {
+  display: block;
+  text-align: center;
+  background: var(--line);
+  color: var(--text);
+  text-decoration: none;
+  font-size: 12.5px;
+  font-weight: 600;
+  padding: 7px 0;
+  border-radius: 6px;
+}
+.card a.dl:hover { background: var(--hot); color: #14090a; }
