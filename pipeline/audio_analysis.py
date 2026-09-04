@@ -1,62 +1,77 @@
 """
-Audio intensity signal: RMS energy + onset strength, deviation from a
-rolling local baseline (not a global one -- a naturally loud game
-shouldn't false-positive just because it's loud throughout).
+Audio intensity signal: RMS energy + spectral-flux "onset" strength,
+deviation from a rolling local baseline (not a global one -- a naturally
+loud game shouldn't false-positive just because it's loud throughout).
+
+Computed by streaming raw PCM straight out of an ffmpeg pipe, one small
+window at a time -- never loads the whole track into memory. This matters
+on memory-constrained hosts (e.g. a 512MB free-tier server): librosa's
+approach of loading the full signal + computing a full mel-spectrogram at
+once can peak well over a gigabyte on a longer VOD.
 """
-import os
 import subprocess
-import tempfile
 
 import numpy as np
-import librosa
 
 
-WINDOW_SEC = 0.5          # RMS window size
+WINDOW_SEC = 0.5          # analysis window size
 BASELINE_WINDOW_SEC = 90  # rolling baseline window (local, not global)
+SR = 16000                # sample rate for analysis -- plenty for energy/flux,
+                           # keeps each window's FFT small
 
 
-def _extract_audio_wav(video_path: str, sr: int) -> str:
-    """ffmpeg is far more reliable than librosa/soundfile at reading audio
-    out of arbitrary video containers, so always go through it first."""
-    fd, wav_path = tempfile.mkstemp(suffix=".wav")
-    os.close(fd)
-    cmd = [
-        "ffmpeg", "-y", "-i", video_path,
-        "-vn", "-ac", "1", "-ar", str(sr), wav_path,
-    ]
-    subprocess.run(cmd, check=True, capture_output=True)
-    return wav_path
-
-
-def analyze_audio(video_path: str, sr: int = 22050) -> dict:
+def analyze_audio(video_path: str, sr: int = SR) -> dict:
     """
     Returns dict with:
       times: np.ndarray of timestamps (seconds)
       score: np.ndarray of normalized 0-1 audio intensity per timestamp
     """
-    wav_path = _extract_audio_wav(video_path, sr)
+    window_samples = int(WINDOW_SEC * sr)
+    bytes_per_window = window_samples * 2  # s16le = 2 bytes/sample
+
+    cmd = [
+        "ffmpeg", "-i", video_path,
+        "-vn", "-ac", "1", "-ar", str(sr),
+        "-f", "s16le", "-acodec", "pcm_s16le", "-",
+    ]
+    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+
+    rms_list = []
+    flux_list = []
+    prev_spectrum = None
+
     try:
-        y, sr = librosa.load(wav_path, sr=sr, mono=True)
+        while True:
+            chunk = proc.stdout.read(bytes_per_window)
+            # drop a short trailing partial window rather than pad it
+            if not chunk or len(chunk) < bytes_per_window // 2:
+                break
+            samples = np.frombuffer(chunk, dtype=np.int16).astype(np.float32) / 32768.0
+
+            rms_list.append(float(np.sqrt(np.mean(samples ** 2))))
+
+            spectrum = np.abs(np.fft.rfft(samples))
+            if prev_spectrum is not None and len(prev_spectrum) == len(spectrum):
+                flux_list.append(float(np.sum(np.clip(spectrum - prev_spectrum, 0, None))))
+            else:
+                flux_list.append(0.0)
+            prev_spectrum = spectrum
     finally:
-        os.remove(wav_path)
+        proc.stdout.close()
+        proc.wait()
 
-    hop_length = int(WINDOW_SEC * sr)
-    rms = librosa.feature.rms(y=y, frame_length=hop_length * 2, hop_length=hop_length)[0]
-    onset_env = librosa.onset.onset_strength(y=y, sr=sr, hop_length=hop_length)
+    rms_arr = np.array(rms_list, dtype=np.float64)
+    flux_arr = np.array(flux_list, dtype=np.float64)
+    times = np.arange(len(rms_arr)) * WINDOW_SEC
 
-    # Align lengths (rms/onset can differ by a frame or two)
-    n = min(len(rms), len(onset_env))
-    rms, onset_env = rms[:n], onset_env[:n]
-    times = librosa.frames_to_time(np.arange(n), sr=sr, hop_length=hop_length)
+    if len(rms_arr) == 0:
+        return {"times": np.array([0.0]), "score": np.array([0.0])}
 
-    # Normalize each 0-1 independently, then combine
     def norm(x):
         x = x - x.min()
         return x / x.max() if x.max() > 0 else x
 
-    rms_n = norm(rms)
-    onset_n = norm(onset_env)
-    raw = 0.5 * rms_n + 0.5 * onset_n
+    raw = 0.5 * norm(rms_arr) + 0.5 * norm(flux_arr)
 
     # Rolling local baseline subtraction: flag deviation, not raw loudness
     baseline_frames = max(1, int(BASELINE_WINDOW_SEC / WINDOW_SEC))
