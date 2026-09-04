@@ -22,6 +22,16 @@ audioWeight.addEventListener("input", () => {
   weightHint.textContent = `${a}% audio / ${100 - a}% motion`;
 });
 
+// Remember the access key across refreshes so a resumed job doesn't need
+// it re-typed to keep polling.
+if (accessKeyInput) {
+  const savedKey = localStorage.getItem("accessKey");
+  if (savedKey) accessKeyInput.value = savedKey;
+  accessKeyInput.addEventListener("input", () => {
+    localStorage.setItem("accessKey", accessKeyInput.value.trim());
+  });
+}
+
 // Decorative animated waveform while a job runs, just to make "processing"
 // feel like what the tool is actually doing (reading an intensity signal).
 let pulseTimer = null;
@@ -78,7 +88,22 @@ async function startJob() {
     showError(data.error);
     return;
   }
+  rememberJob(data.job_id);
   poll(data.job_id);
+}
+
+function rememberJob(jobId) {
+  localStorage.setItem("activeJobId", jobId);
+  const url = new URL(window.location);
+  url.searchParams.set("job", jobId);
+  window.history.replaceState(null, "", url);
+}
+
+function forgetJob() {
+  localStorage.removeItem("activeJobId");
+  const url = new URL(window.location);
+  url.searchParams.delete("job");
+  window.history.replaceState(null, "", url);
 }
 
 function poll(jobId) {
@@ -86,12 +111,23 @@ function poll(jobId) {
     const res = await fetch(`/api/status/${jobId}${keyParam()}`);
     const job = await res.json();
 
+    if (res.status === 404) {
+      // Free-tier server restarted and lost its in-memory job list.
+      clearInterval(interval);
+      stopPulse();
+      forgetJob();
+      showError("Lost track of this job (the server likely restarted while idle). Please paste the link again to restart.");
+      return;
+    }
+
     stageLabel.textContent = job.stage.replace(/_/g, " ");
     pctLabel.textContent = `${Math.round(job.pct)}%`;
     pulseFill.style.width = `${job.pct}%`;
 
     if (job.error) {
       clearInterval(interval);
+      stopPulse();
+      forgetJob();
       showError(job.error);
       return;
     }
@@ -99,6 +135,7 @@ function poll(jobId) {
     if (job.stage === "done" && job.clips) {
       clearInterval(interval);
       stopPulse();
+      forgetJob();
       renderResults(jobId, job);
     }
   }, 1200);
@@ -143,3 +180,17 @@ function formatTime(sec) {
   const s = Math.floor(sec % 60);
   return `${m}:${s.toString().padStart(2, "0")}`;
 }
+
+// On page load, if a job was already running (survives a Safari refresh
+// or reopening the tab), reconnect to it instead of showing a blank form.
+(function resumeIfActive() {
+  const params = new URLSearchParams(window.location.search);
+  const jobId = params.get("job") || localStorage.getItem("activeJobId");
+  if (!jobId) return;
+
+  progressPanel.classList.remove("hidden");
+  stageLabel.textContent = "reconnecting";
+  startBtn.disabled = true;
+  animatePulse();
+  poll(jobId);
+})();
