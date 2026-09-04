@@ -1,13 +1,21 @@
 """
-Visual intensity signal: frame-differencing / motion magnitude, sampled
-at a low FPS (full-framerate analysis is wasteful and slow). Catches
-fast camera movement, on-screen action, quick cuts.
+Visual intensity signal: frame-differencing / motion magnitude.
+
+Reads frames straight out of an ffmpeg pipe that's already downsampled to
+a low FPS and small resolution (ffmpeg does the heavy decode+downscale
+work in optimized C, not Python) -- this avoids decoding every single
+frame of the source video just to throw most of them away, which is what
+made this stage painfully slow on a CPU-constrained host (a free-tier
+server's fraction-of-a-core CPU has to fully decode the whole framerate
+otherwise, even though we only need ~1.5 samples/sec).
 """
-import cv2
+import subprocess
+
 import numpy as np
 
 
 SAMPLE_FPS = 1.5  # frames per second to sample for motion analysis
+WIDTH, HEIGHT = 160, 90  # small on purpose -- we only need motion magnitude
 
 
 def analyze_visual(video_path: str) -> dict:
@@ -16,32 +24,33 @@ def analyze_visual(video_path: str) -> dict:
       times: np.ndarray of timestamps (seconds)
       score: np.ndarray of normalized 0-1 motion intensity per timestamp
     """
-    cap = cv2.VideoCapture(video_path)
-    fps = cap.get(cv2.CAP_PROP_FPS) or 30
-    frame_interval = max(1, int(round(fps / SAMPLE_FPS)))
+    frame_bytes = WIDTH * HEIGHT  # 1 byte/pixel, grayscale
 
-    times, diffs = [], []
-    prev_gray = None
-    frame_idx = 0
+    cmd = [
+        "ffmpeg", "-i", video_path,
+        "-vf", f"fps={SAMPLE_FPS},scale={WIDTH}:{HEIGHT}",
+        "-f", "rawvideo", "-pix_fmt", "gray", "-",
+    ]
+    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
 
-    while True:
-        ret, frame = cap.read()
-        if not ret:
-            break
-        if frame_idx % frame_interval == 0:
-            small = cv2.resize(frame, (160, 90))  # downscale, we only need magnitude
-            gray = cv2.cvtColor(small, cv2.COLOR_BGR2GRAY)
-            if prev_gray is not None:
-                diff = cv2.absdiff(gray, prev_gray)
-                diffs.append(float(np.mean(diff)))
-                times.append(frame_idx / fps)
-            prev_gray = gray
-        frame_idx += 1
+    diffs = []
+    prev = None
 
-    cap.release()
+    try:
+        while True:
+            chunk = proc.stdout.read(frame_bytes)
+            if not chunk or len(chunk) < frame_bytes:
+                break
+            frame = np.frombuffer(chunk, dtype=np.uint8).astype(np.int16)
+            if prev is not None:
+                diffs.append(float(np.mean(np.abs(frame - prev))))
+            prev = frame
+    finally:
+        proc.stdout.close()
+        proc.wait()
 
     diffs = np.array(diffs, dtype=np.float64)
-    times = np.array(times, dtype=np.float64)
+    times = np.arange(len(diffs)) / SAMPLE_FPS
 
     if len(diffs) == 0:
         return {"times": np.array([0.0]), "score": np.array([0.0])}
