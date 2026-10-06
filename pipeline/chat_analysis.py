@@ -17,9 +17,21 @@ def analyze_chat(vod_url: str, duration: float) -> dict:
       times: np.ndarray of timestamps (seconds)
       score: np.ndarray of normalized 0-1 chat intensity per timestamp
     """
-    downloader = ChatDownloader()
-    chat = downloader.get_chat(vod_url)
+        downloader = ChatDownloader()
+    chat = downloader.get_chat(
+        vod_url,
+        # interruptible_retry's default behavior tries to read a keypress
+        # from the terminal between retries (to let you skip the wait) --
+        # that crashes hard with "[Errno 1] Operation not permitted" when
+        # there's no real terminal attached, which is always true running
+        # as a background job on a server. Also cap attempts: the library's
+        # default (15, exponential backoff) can wait over an hour total,
+        # way too long for what should fail fast if it's going to fail.
+        interruptible_retry=False,
+        max_attempts=5,
+    )
     message_times = []
+
     for message in chat:
         t = message.get("time_in_seconds")
         if t is not None and t >= 0:
