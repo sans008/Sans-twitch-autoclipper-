@@ -6,7 +6,6 @@
   --dim: #8a8d98;
   --hot: #ff4d3d;
   --hot-dim: #ff4d3d33;
-  --ok: #3ddc97;
 }
 
 * { box-sizing: border-box; }
@@ -40,7 +39,7 @@ header {
 }
 
 h1 {
-  font-size: 28px;
+  font-size: 26px;
   font-weight: 700;
   letter-spacing: -0.02em;
   margin: 0 0 6px;
@@ -89,6 +88,7 @@ h1 {
   font-size: 14.5px;
   cursor: pointer;
   transition: filter 0.15s;
+  white-space: nowrap;
 }
 #start-btn:hover { filter: brightness(1.08); }
 #start-btn:disabled { opacity: 0.5; cursor: default; }
@@ -119,7 +119,7 @@ h1 {
   color: var(--dim);
 }
 
-.settings-grid input, .settings-grid select {
+.settings-grid input {
   background: #0c0d10;
   border: 1px solid var(--line);
   border-radius: 7px;
@@ -177,53 +177,65 @@ h1 {
   letter-spacing: 0.04em;
 }
 
-.grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-  gap: 14px;
+.moment-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 
-.card {
+.moment-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
   background: #0c0d10;
   border: 1px solid var(--line);
   border-radius: 10px;
+  padding: 12px 14px;
+  text-decoration: none;
+  color: var(--text);
+  transition: border-color 0.15s;
+}
+.moment-row:hover { border-color: var(--hot); }
+
+.moment-rank {
+  font-size: 12px;
+  color: var(--dim);
+  width: 20px;
+  text-align: center;
+  flex-shrink: 0;
+}
+
+.moment-time {
+  font-weight: 700;
+  font-size: 15px;
+  font-variant-numeric: tabular-nums;
+  min-width: 68px;
+}
+
+.moment-bar-track {
+  flex: 1;
+  height: 6px;
+  background: var(--line);
+  border-radius: 3px;
   overflow: hidden;
 }
-
-.card img {
-  width: 100%;
-  aspect-ratio: 16/9;
-  object-fit: cover;
-  display: block;
-  background: #000;
+.moment-bar-fill {
+  height: 100%;
+  background: var(--hot);
+  border-radius: 3px;
 }
 
-.card-body {
-  padding: 10px 12px;
-}
-
-.card-meta {
-  display: flex;
-  justify-content: space-between;
-  font-size: 11.5px;
+.moment-score {
+  font-size: 12px;
   color: var(--dim);
-  margin-bottom: 8px;
+  width: 32px;
+  text-align: right;
+  flex-shrink: 0;
 }
 
-.score-tag {
+.moment-go {
+  font-size: 12px;
   color: var(--hot);
-  font-weight: 700;
-}
-
-.card a.dl {
-  display: block;
-  text-align: center;
-  background: var(--line);
-  color: var(--text);
-  text-decoration: none;
-  font-size: 12.5px;
   font-weight: 600;
-  padding: 7px 0;
-  border-radius: 6px;
+  flex-shrink: 0;
 }
-.card a.dl:hover { background: var(--hot); color: #14090a; }
