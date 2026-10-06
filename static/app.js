@@ -3,9 +3,8 @@ const accessKeyInput = document.getElementById("access-key");
 const startBtn = document.getElementById("start-btn");
 const audioWeight = document.getElementById("audio-weight");
 const weightHint = document.getElementById("weight-hint");
-const clipLength = document.getElementById("clip-length");
-const maxClips = document.getElementById("max-clips");
-const targetHeight = document.getElementById("target-height");
+const windowSec = document.getElementById("window-sec");
+const maxMoments = document.getElementById("max-moments");
 
 const progressPanel = document.getElementById("progress-panel");
 const resultsPanel = document.getElementById("results-panel");
@@ -14,16 +13,14 @@ const pctLabel = document.getElementById("pct-label");
 const pulseFill = document.getElementById("pulse-fill");
 const pulseLine = document.getElementById("pulse-line");
 const errorMsg = document.getElementById("error-msg");
-const resultsGrid = document.getElementById("results-grid");
+const momentList = document.getElementById("moment-list");
 const resultsTitle = document.getElementById("results-title");
 
 audioWeight.addEventListener("input", () => {
   const a = Math.round(audioWeight.value * 100);
-  weightHint.textContent = `${a}% audio / ${100 - a}% motion`;
+  weightHint.textContent = `${a}% audio / ${100 - a}% chat`;
 });
 
-// Remember the access key across refreshes so a resumed job doesn't need
-// it re-typed to keep polling.
 if (accessKeyInput) {
   const savedKey = localStorage.getItem("accessKey");
   if (savedKey) accessKeyInput.value = savedKey;
@@ -32,8 +29,6 @@ if (accessKeyInput) {
   });
 }
 
-// Decorative animated waveform while a job runs, just to make "processing"
-// feel like what the tool is actually doing (reading an intensity signal).
 let pulseTimer = null;
 function animatePulse() {
   const points = [];
@@ -78,9 +73,9 @@ async function startJob() {
     body: JSON.stringify({
       url,
       audio_weight: audioWeight.value,
-      clip_length: clipLength.value,
-      max_clips: maxClips.value,
-      target_height: targetHeight.value,
+      chat_weight: 1 - audioWeight.value,
+      window_sec: windowSec.value,
+      max_moments: maxMoments.value,
     }),
   });
   const data = await res.json();
@@ -112,7 +107,6 @@ function poll(jobId) {
     const job = await res.json();
 
     if (res.status === 404) {
-      // Free-tier server restarted and lost its in-memory job list.
       clearInterval(interval);
       stopPulse();
       forgetJob();
@@ -132,11 +126,11 @@ function poll(jobId) {
       return;
     }
 
-    if (job.stage === "done" && job.clips) {
+    if (job.stage === "done" && job.moments) {
       clearInterval(interval);
       stopPulse();
       forgetJob();
-      renderResults(jobId, job);
+      renderResults(job);
     }
   }, 1200);
 }
@@ -148,41 +142,33 @@ function showError(msg) {
   errorMsg.classList.remove("hidden");
 }
 
-function renderResults(jobId, job) {
+function renderResults(job) {
   startBtn.disabled = false;
   progressPanel.classList.add("hidden");
   resultsPanel.classList.remove("hidden");
-  resultsTitle.textContent = job.title ? `Clips from "${job.title}"` : "Clips";
+  resultsTitle.textContent = job.title ? `Hype moments in "${job.title}"` : "Hype Moments";
 
-  resultsGrid.innerHTML = "";
-  job.clips
-    .slice()
-    .sort((a, b) => b.score - a.score)
-    .forEach((clip, i) => {
-      const card = document.createElement("div");
-      card.className = "card";
-      card.innerHTML = `
-        <img src="/clips/${jobId}/${clip.thumb}${keyParam()}" alt="clip ${i + 1} thumbnail">
-        <div class="card-body">
-          <div class="card-meta">
-            <span>${clip.duration}s · ${formatTime(clip.start)}</span>
-            <span class="score-tag">${Math.round(clip.score * 100)}</span>
-          </div>
-          <a class="dl" href="/clips/${jobId}/${clip.file}${keyParam()}" download>Download</a>
-        </div>
-      `;
-      resultsGrid.appendChild(card);
-    });
+  momentList.innerHTML = "";
+  const sorted = job.moments.slice().sort((a, b) => b.score - a.score);
+  sorted.forEach((m, i) => {
+    const row = document.createElement(m.link ? "a" : "div");
+    row.className = "moment-row";
+    if (m.link) {
+      row.href = m.link;
+      row.target = "_blank";
+      row.rel = "noopener";
+    }
+    row.innerHTML = `
+      <span class="moment-rank">${i + 1}</span>
+      <span class="moment-time">${m.timestamp}</span>
+      <span class="moment-bar-track"><span class="moment-bar-fill" style="width:${Math.round(m.score * 100)}%"></span></span>
+      <span class="moment-score">${Math.round(m.score * 100)}</span>
+      ${m.link ? '<span class="moment-go">Open ›</span>' : ""}
+    `;
+    momentList.appendChild(row);
+  });
 }
 
-function formatTime(sec) {
-  const m = Math.floor(sec / 60);
-  const s = Math.floor(sec % 60);
-  return `${m}:${s.toString().padStart(2, "0")}`;
-}
-
-// On page load, if a job was already running (survives a Safari refresh
-// or reopening the tab), reconnect to it instead of showing a blank form.
 (function resumeIfActive() {
   const params = new URLSearchParams(window.location.search);
   const jobId = params.get("job") || localStorage.getItem("activeJobId");
