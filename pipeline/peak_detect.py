@@ -1,6 +1,6 @@
 """
-Combines audio + visual intensity signals into one timeline, then finds
-peaks = "high intensity moments" and turns each into a clip window.
+Combines audio + chat intensity signals into one timeline, then finds
+peaks = "high intensity moments" and turns each into a timeframe.
 """
 import numpy as np
 from scipy.signal import find_peaks
@@ -9,27 +9,25 @@ from scipy.interpolate import interp1d
 
 def combine_and_detect(
     audio: dict,
-    visual: dict,
+    chat: dict,
     duration: float,
-    audio_weight: float = 0.6,
-    visual_weight: float = 0.4,
+    audio_weight: float = 0.5,
+    chat_weight: float = 0.5,
     pre_roll: float = 8.0,
     post_roll: float = 22.0,
     min_gap_sec: float = 45.0,
-    max_clips: int = 15,
+    max_moments: int = 20,
 ) -> list:
     """
-    Returns a list of clip dicts: [{start, end, score}, ...] sorted by
-    start time, highest-intensity moments first when max_clips truncates.
+    Returns a list of moment dicts: [{start, end, score}, ...] sorted by
+    start time, highest-intensity moments first when max_moments truncates.
     """
-    # Common timeline (1 sample per second) so audio/visual (different
-    # native resolutions) can be summed directly.
     common_times = np.arange(0, duration, 1.0)
 
     audio_interp = _safe_interp(audio["times"], audio["score"], common_times)
-    visual_interp = _safe_interp(visual["times"], visual["score"], common_times)
+    chat_interp = _safe_interp(chat["times"], chat["score"], common_times)
 
-    combined = audio_weight * audio_interp + visual_weight * visual_interp
+    combined = audio_weight * audio_interp + chat_weight * chat_interp
     combined = _smooth(combined, window=5)
 
     min_distance = max(1, int(min_gap_sec))
@@ -40,18 +38,17 @@ def combine_and_detect(
     )
 
     peaks = [(common_times[i], combined[i]) for i in peak_idx]
-    # Highest score first, cap to max_clips, then re-sort chronologically
     peaks.sort(key=lambda p: p[1], reverse=True)
-    peaks = peaks[:max_clips]
+    peaks = peaks[:max_moments]
     peaks.sort(key=lambda p: p[0])
 
-    clips = []
+    moments = []
     for t, score in peaks:
         start = max(0.0, t - pre_roll)
         end = min(duration, t + post_roll)
-        clips.append({"start": round(start, 2), "end": round(end, 2), "score": round(float(score), 4)})
+        moments.append({"start": round(start, 2), "end": round(end, 2), "score": round(float(score), 4)})
 
-    return _merge_overlapping(clips)
+    return _merge_overlapping(moments)
 
 
 def _safe_interp(x, y, common_times):
@@ -68,15 +65,15 @@ def _smooth(x, window=5):
     return np.convolve(x, kernel, mode="same")
 
 
-def _merge_overlapping(clips: list) -> list:
-    if not clips:
+def _merge_overlapping(moments: list) -> list:
+    if not moments:
         return []
-    merged = [clips[0]]
-    for c in clips[1:]:
+    merged = [moments[0]]
+    for m in moments[1:]:
         last = merged[-1]
-        if c["start"] <= last["end"]:
-            last["end"] = max(last["end"], c["end"])
-            last["score"] = max(last["score"], c["score"])
+        if m["start"] <= last["end"]:
+            last["end"] = max(last["end"], m["end"])
+            last["score"] = max(last["score"], m["score"])
         else:
-            merged.append(c)
+            merged.append(m)
     return merged
