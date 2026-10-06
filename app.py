@@ -1,27 +1,32 @@
 """
-Twitch Auto-Clipper -- local Flask app.
+Hype Moment Finder -- local Flask app.
+
+Paste a Twitch VOD link. It downloads ONLY the audio (not the video --
+20-50x smaller) plus the chat replay, finds where chat floods and/or
+audio spikes happen, and gives you a list of timestamps with direct
+links into the VOD at that moment. You do the clipping yourself from
+there -- this just tells you where to look.
 
 Run with:  python app.py
 Then open: http://localhost:5000
 """
 import os
+import re
+import shutil
 import threading
 import traceback
 import uuid
 from functools import wraps
 
-from flask import Flask, jsonify, render_template, request, send_from_directory
+from flask import Flask, jsonify, render_template, request
 
-from pipeline.download import download_vod
+from pipeline.download import download_audio_only
 from pipeline.audio_analysis import analyze_audio
-from pipeline.visual_analysis import analyze_visual
+from pipeline.chat_analysis import analyze_chat
 from pipeline.peak_detect import combine_and_detect
-from pipeline.clip import process_clips
 
 app = Flask(__name__)
 
-# If set, every request needs this as a URL param (?key=...) or the UI's
-# password field. Leave APP_PASSWORD unset for local/private-network use.
 APP_PASSWORD = os.environ.get("APP_PASSWORD")
 
 
@@ -37,68 +42,82 @@ def require_password(fn):
     return wrapped
 
 
-OUTPUT_ROOT = os.path.join(os.path.dirname(__file__), "output")
-os.makedirs(OUTPUT_ROOT, exist_ok=True)
+TMP_ROOT = os.path.join(os.path.dirname(__file__), "tmp")
+os.makedirs(TMP_ROOT, exist_ok=True)
 
-# In-memory job store. Fine for a local single-user tool; swap for a real
-# queue/db if this ever needs to run multi-user or survive restarts.
 JOBS = {}
 
 
-def _set_status(job_id, stage, pct=None, error=None, clips=None):
+def _set_status(job_id, stage, pct=None, error=None, moments=None):
     JOBS[job_id].update({
         "stage": stage,
         "pct": pct if pct is not None else JOBS[job_id].get("pct", 0),
         "error": error,
-        "clips": clips if clips is not None else JOBS[job_id].get("clips"),
+        "moments": moments if moments is not None else JOBS[job_id].get("moments"),
     })
 
 
-def run_job(job_id: str, url: str, target_height: int, audio_weight: float,
-            clip_length: int, max_clips: int):
-    job_dir = os.path.join(OUTPUT_ROOT, job_id)
+def _extract_vod_id(url: str) -> str:
+    m = re.search(r"videos/(\d+)", url)
+    return m.group(1) if m else ""
+
+
+def _format_hms(seconds: float) -> str:
+    seconds = int(seconds)
+    h, rem = divmod(seconds, 3600)
+    m, s = divmod(rem, 60)
+    return f"{h}h{m}m{s}s" if h else f"{m}m{s}s"
+
+
+def run_job(job_id: str, url: str, audio_weight: float, chat_weight: float,
+            window_sec: int, max_moments: int):
+    job_dir = os.path.join(TMP_ROOT, job_id)
     try:
-        _set_status(job_id, "downloading", 5)
+        _set_status(job_id, "downloading audio", 5)
 
         def hook(d):
             if d.get("status") == "downloading":
                 pct = d.get("_percent_str", "0%").strip().replace("%", "")
                 try:
-                    _set_status(job_id, "downloading", 5 + float(pct) * 0.35)
+                    _set_status(job_id, "downloading audio", 5 + float(pct) * 0.25)
                 except ValueError:
                     pass
 
-        info = download_vod(url, job_dir, progress_hook=hook)
-        video_path = info["video_path"]
+        info = download_audio_only(url, job_dir, progress_hook=hook)
+        audio_path = info["audio_path"]
+        duration = info["duration"] or 1
 
-        _set_status(job_id, "analyzing audio", 45)
-        audio = analyze_audio(video_path)
+        _set_status(job_id, "analyzing audio", 35)
+        audio = analyze_audio(audio_path)
 
-        _set_status(job_id, "analyzing motion", 60)
-        visual = analyze_visual(video_path)
+        _set_status(job_id, "reading chat replay", 55)
+        chat = analyze_chat(url, duration)
 
-        _set_status(job_id, "finding high-intensity moments", 75)
-        pre_roll = clip_length * 0.3
-        post_roll = clip_length * 0.7
-        clips = combine_and_detect(
-            audio, visual, duration=info["duration"],
-            audio_weight=audio_weight, visual_weight=1 - audio_weight,
+        _set_status(job_id, "finding hype moments", 85)
+        pre_roll = window_sec * 0.3
+        post_roll = window_sec * 0.7
+        moments = combine_and_detect(
+            audio, chat, duration=duration,
+            audio_weight=audio_weight, chat_weight=chat_weight,
             pre_roll=pre_roll, post_roll=post_roll,
-            max_clips=max_clips,
+            max_moments=max_moments,
         )
 
-        if not clips:
-            _set_status(job_id, "done", 100, error="No high-intensity moments found. Try lowering sensitivity.")
-            return
+        vod_id = info.get("vod_id") or _extract_vod_id(url)
+        for m in moments:
+            m["timestamp"] = _format_hms(m["start"])
+            m["link"] = f"https://www.twitch.tv/videos/{vod_id}?t={m['timestamp']}" if vod_id else None
 
-        _set_status(job_id, "cutting clips", 85)
-        results = process_clips(video_path, clips, job_dir, target_height=target_height)
-
-        _set_status(job_id, "done", 100, clips=results)
-        JOBS[job_id]["title"] = info["title"]
+        if not moments:
+            _set_status(job_id, "done", 100, error="No standout hype moments found. Try lowering sensitivity or a different VOD.")
+        else:
+            _set_status(job_id, "done", 100, moments=moments)
+            JOBS[job_id]["title"] = info["title"]
     except Exception as e:
         traceback.print_exc()
         _set_status(job_id, "error", JOBS[job_id].get("pct", 0), error=str(e))
+    finally:
+        shutil.rmtree(job_dir, ignore_errors=True)
 
 
 @app.route("/")
@@ -115,16 +134,16 @@ def start():
         return jsonify({"error": "No URL provided"}), 400
 
     job_id = uuid.uuid4().hex[:12]
-    JOBS[job_id] = {"stage": "queued", "pct": 0, "error": None, "clips": None}
+    JOBS[job_id] = {"stage": "queued", "pct": 0, "error": None, "moments": None}
 
     thread = threading.Thread(
         target=run_job,
         args=(
             job_id, url,
-            int(data.get("target_height", 1080)),
-            float(data.get("audio_weight", 0.6)),
-            int(data.get("clip_length", 30)),
-            int(data.get("max_clips", 15)),
+            float(data.get("audio_weight", 0.5)),
+            float(data.get("chat_weight", 0.5)),
+            int(data.get("window_sec", 30)),
+            int(data.get("max_moments", 20)),
         ),
         daemon=True,
     )
@@ -141,15 +160,6 @@ def status(job_id):
     return jsonify(job)
 
 
-@app.route("/clips/<job_id>/<filename>")
-@require_password
-def serve_clip(job_id, filename):
-    return send_from_directory(os.path.join(OUTPUT_ROOT, job_id), filename)
-
-
 if __name__ == "__main__":
-    # host=0.0.0.0 so it's reachable from outside the server itself.
-    # Render (and most PaaS hosts) inject the port to bind via $PORT --
-    # falls back to 5000 for local/VPS use where nothing sets it.
     port = int(os.environ.get("PORT", 5000))
     app.run(debug=False, host="0.0.0.0", port=port)
