@@ -17,7 +17,7 @@ def analyze_chat(vod_url: str, duration: float) -> dict:
       times: np.ndarray of timestamps (seconds)
       score: np.ndarray of normalized 0-1 chat intensity per timestamp
     """
-        downloader = ChatDownloader()
+    downloader = ChatDownloader()
     chat = downloader.get_chat(
         vod_url,
         # interruptible_retry's default behavior tries to read a keypress
@@ -31,7 +31,6 @@ def analyze_chat(vod_url: str, duration: float) -> dict:
         max_attempts=5,
     )
     message_times = []
-
     for message in chat:
         t = message.get("time_in_seconds")
         if t is not None and t >= 0:
